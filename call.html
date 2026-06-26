@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audio Call - SecureConnect</title>
+  
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0b141a; color: #e9edef; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
+    
+    .top-bar { position: absolute; top: 0; width: 100%; padding: 20px; display: flex; justify-content: space-between; align-items: center; }
+    .back-btn { font-size: 24px; cursor: pointer; color: #00a884; font-weight: bold; padding: 10px; }
+    .encryption { font-size: 13px; color: #00a884; display: flex; align-items: center; gap: 6px; background: rgba(0, 168, 132, 0.1); padding: 5px 12px; border-radius: 15px; }
+
+    .caller-info { text-align: center; margin-bottom: 50px; z-index: 2; }
+    .caller-name { font-size: 32px; font-weight: bold; margin-bottom: 8px; letter-spacing: 1px; }
+    .call-status { font-size: 18px; color: #8696a0; transition: color 0.3s; }
+    .timer-active { color: #00a884 !important; font-weight: bold; font-family: monospace; font-size: 20px; }
+
+    .avatar-wrapper { position: relative; margin-bottom: 70px; }
+    .avatar { width: 140px; height: 140px; background: #202c33; border: 4px solid #00a884; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 60px; color: #00a884; z-index: 2; position: relative; text-transform: uppercase; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+    
+    .pulse { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 140px; height: 140px; background: rgba(0, 168, 132, 0.3); border-radius: 50%; z-index: 1; animation: pulse-anim 2s infinite; }
+    .pulse:nth-child(2) { animation-delay: 0.6s; }
+    
+    @keyframes pulse-anim { 0% { width: 140px; height: 140px; opacity: 1; } 100% { width: 280px; height: 280px; opacity: 0; } }
+
+    .actions { display: flex; gap: 40px; align-items: center; z-index: 2; background: #202c33; padding: 20px 40px; border-radius: 40px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+    .action-btn { width: 65px; height: 65px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 26px; cursor: pointer; border: none; transition: 0.3s; }
+    
+    .mute-btn { background: #2a3942; color: white; }
+    .mute-btn:hover { background: #32434d; }
+    .end-btn { background: #ff5b5b; color: white; width: 75px; height: 75px; font-size: 32px; box-shadow: 0 5px 20px rgba(255, 91, 91, 0.4); }
+    .end-btn:hover { background: #e34040; transform: translateY(-3px); }
+  </style>
+</head>
+<body>
+
+  <div class="top-bar">
+    <div class="back-btn" onclick="endCall()">🡐</div>
+    <div class="encryption">🔒 End-to-end encrypted</div>
+  </div>
+
+  <div class="caller-info">
+    <div class="caller-name" id="callerName">Loading...</div>
+    <div class="call-status" id="callStatus">Ringing...</div>
+  </div>
+
+  <div class="avatar-wrapper">
+    <div class="pulse" id="pulse1"></div>
+    <div class="pulse" id="pulse2"></div>
+    <div class="avatar" id="callerAvatar">U</div>
+  </div>
+
+  <div class="actions">
+    <button class="action-btn mute-btn" onclick="toggleMute()" id="muteBtn">🎤</button>
+    <button class="action-btn end-btn" onclick="endCall()">☎</button>
+  </div>
+
+  <audio id="remoteAudio" autoplay></audio>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyB2o5DXG0r249JfueFAL7ybXiDspUdW0Ns",
+      authDomain: "privateconnect-37f5b.firebaseapp.com",
+      databaseURL: "https://privateconnect-37f5b-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "privateconnect-37f5b",
+      storageBucket: "privateconnect-37f5b.firebasestorage.app",
+      messagingSenderId: "177183011219",
+      appId: "1:177183011219:web:11868ef01a65b2d46d7866"
+    };
+
+    if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+    const db = firebase.database();
+
+    const currentUserId = localStorage.getItem('myId');
+    const params = new URLSearchParams(window.location.search);
+    const targetUserId = params.get('with');
+    
+    if (!currentUserId || !targetUserId) window.location.href = "index.html";
+
+    document.getElementById('callerName').textContent = targetUserId;
+    document.getElementById('callerAvatar').textContent = targetUserId.charAt(0);
+    const statusText = document.getElementById('callStatus');
+
+    const callRoomId = [currentUserId, targetUserId].sort().join("_") + "_CALL";
+    const remoteAudio = document.getElementById('remoteAudio');
+    
+    const outgoingRingtone = new Audio('https://actions.google.com/sounds/v1/communications/calling_connect.ogg');
+    outgoingRingtone.loop = true;
+
+    const servers = { iceServers: [{ urls: ['stun:stun1.l.google.com:19302'] }] };
+    let pc = new RTCPeerConnection(servers);
+    let localStream;
+    let isMuted = false;
+    let timerInterval;
+
+    navigator.mediaDevices.getUserMedia({ video: false, audio: true })
+    .then(stream => {
+        localStream = stream;
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+        startCallLogic();
+    })
+    .catch(error => {
+        statusText.innerText = "Mic Permission Denied!";
+        statusText.style.color = "#ff5b5b";
+        alert("App settings se Microphone allow karein.");
+    });
+
+    pc.ontrack = event => {
+        remoteAudio.srcObject = event.streams[0];
+        outgoingRingtone.pause();
+        
+        statusText.classList.add('timer-active');
+        document.querySelector('.avatar').style.background = "#00a884";
+        document.querySelector('.avatar').style.color = "#111b21";
+        
+        let seconds = 0;
+        timerInterval = setInterval(() => {
+            seconds++;
+            let m = String(Math.floor(seconds / 60)).padStart(2, '0');
+            let s = String(seconds % 60).padStart(2, '0');
+            statusText.innerText = `${m}:${s}`;
+        }, 1000);
+    };
+
+    function startCallLogic() {
+        const callRef = db.ref('calls/' + callRoomId);
+
+        pc.onicecandidate = event => {
+            if(event.candidate) {
+                callRef.child('candidates').push({ candidate: event.candidate.toJSON(), sender: currentUserId });
+            }
+        };
+
+        callRef.on('value', async snapshot => {
+            const data = snapshot.val();
+            if(!data) {
+                if(timerInterval) endCall(); 
+                return;
+            }
+
+            if (data.offer && data.sender === currentUserId && !timerInterval) {
+                outgoingRingtone.play().catch(e=>{});
+            }
+
+            if(data.offer && data.sender !== currentUserId && pc.signalingState !== "have-remote-offer" && pc.signalingState !== "stable") {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                callRef.update({ answer: answer, sender: currentUserId });
+            }
+            if(data.answer && data.sender !== currentUserId && pc.signalingState !== "stable") {
+                await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            }
+        });
+
+        callRef.child('candidates').on('child_added', snapshot => {
+            const data = snapshot.val();
+            if(data.sender !== currentUserId && data.candidate) {
+                pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+        });
+
+        callRef.once('value', async snapshot => {
+            if(!snapshot.exists() || !snapshot.val().offer) {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                callRef.set({ offer: offer, sender: currentUserId });
+            }
+        });
+    }
+
+    function toggleMute() {
+        if(localStream) {
+            isMuted = !isMuted;
+            localStream.getAudioTracks()[0].enabled = !isMuted;
+            document.getElementById('muteBtn').style.background = isMuted ? "#ff5b5b" : "#2a3942";
+            document.getElementById('muteBtn').innerText = isMuted ? "🔇" : "🎤";
+        }
+    }
+
+    function endCall() {
+        if(localStream) localStream.getTracks().forEach(track => track.stop());
+        if(timerInterval) clearInterval(timerInterval);
+        outgoingRingtone.pause();
+        pc.close();
+        db.ref('calls/' + callRoomId).remove(); 
+        window.location.href = `chat.html?with=${targetUserId}`;
+    }
+  </script>
+</body>
+</html>
