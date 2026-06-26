@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Chat - Secure Connect</title>
+  
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0b141a; color: #e9edef; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+    
+    .header { background: #202c33; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 1px 3px rgba(0,0,0,0.4); z-index: 10; }
+    .user-info { display: flex; align-items: center; gap: 15px; }
+    .back-btn { font-size: 24px; cursor: pointer; color: #00a884; font-weight: bold; }
+    .avatar { width: 40px; height: 40px; background: #00a884; color: #111b21; font-weight: bold; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; text-transform: uppercase; }
+    .header-text h2 { font-size: 16px; font-weight: 600; margin-bottom: 2px; }
+    .header-text p { font-size: 12px; color: #8696a0; }
+    
+    .actions { display: flex; gap: 20px; color: #aebac1; font-size: 20px; }
+    .actions span { cursor: pointer; transition: 0.3s; }
+    .actions span:hover { color: #00a884; }
+
+    .chat-container { flex: 1; overflow-y: auto; padding: 20px 15px; display: flex; flex-direction: column; gap: 10px; background: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png') center/cover; }
+    
+    .message { max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 15px; position: relative; word-wrap: break-word; box-shadow: 0 1px 1px rgba(0,0,0,0.1); }
+    .sent { background: #005c4b; align-self: flex-end; border-top-right-radius: 0; }
+    .received { background: #202c33; align-self: flex-start; border-top-left-radius: 0; }
+    
+    .call-log { background: #233138; color: #00a884; padding: 10px 15px; border-radius: 20px; align-self: center; font-size: 13px; font-weight: bold; display: flex; align-items: center; gap: 8px; border: 1px solid #3a4b54; margin: 10px 0; }
+    
+    .msg-text { margin-bottom: 12px; display: block; }
+    .time { font-size: 11px; color: rgba(255,255,255,0.6); position: absolute; bottom: 4px; right: 8px; }
+    .sent .time { color: #84d2c5; }
+
+    .input-area { background: #202c33; padding: 10px 15px; display: flex; gap: 10px; align-items: center; }
+    input { flex: 1; padding: 12px 20px; border-radius: 25px; background: #2a3942; color: #d1d7db; border: none; font-size: 15px; outline: none; }
+    button { height: 45px; width: 45px; background: #00a884; color: white; border: none; border-radius: 50%; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    
+    .menu-popup { display: none; position: fixed; top: 60px; right: 10px; background: #233138; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); z-index: 100; min-width: 150px; }
+    .menu-popup p { padding: 15px 20px; margin: 0; cursor: pointer; font-size: 15px; font-weight: bold; }
+    .menu-popup p:hover { background: #182229; }
+
+    .incoming-call-box { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(11, 20, 26, 0.95); z-index: 1000; flex-direction: column; align-items: center; justify-content: center; }
+    .incoming-avatar { width: 100px; height: 100px; background: #00a884; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 40px; color: #111b21; margin-bottom: 20px; animation: pulse 1.5s infinite; }
+    .incoming-name { font-size: 28px; font-weight: bold; margin-bottom: 10px; }
+    .incoming-text { font-size: 16px; color: #00a884; margin-bottom: 50px; }
+    .incoming-actions { display: flex; gap: 40px; }
+    .inc-btn { width: 70px; height: 70px; border-radius: 50%; border: none; font-size: 30px; color: white; cursor: pointer; }
+    .btn-decline { background: #ff5b5b; box-shadow: 0 4px 15px rgba(255, 91, 91, 0.4); }
+    .btn-answer { background: #00a884; box-shadow: 0 4px 15px rgba(0, 168, 132, 0.4); }
+    
+    @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(0,168,132,0.7); } 70% { box-shadow: 0 0 0 30px rgba(0,168,132,0); } 100% { box-shadow: 0 0 0 0 rgba(0,168,132,0); } }
+  </style>
+</head>
+<body>
+  
+  <div class="header">
+    <div class="user-info">
+      <div class="back-btn" onclick="goBack()">←</div>
+      <div class="avatar" id="avatarLetter">U</div>
+      <div class="header-text">
+        <h2 id="chatWith">Loading...</h2>
+        <p id="statusText">Online</p>
+      </div>
+    </div>
+    <div class="actions">
+      <span onclick="startCall()">📞</span>
+      <span onclick="showOptions()">⋮</span>
+    </div>
+  </div>
+
+  <div class="chat-container" id="chatBox"></div>
+
+  <div class="input-area">
+    <input type="text" id="messageInput" placeholder="Type a message..." autocomplete="off" />
+    <button onclick="sendMessage()">➤</button>
+  </div>
+
+  <div id="optionsMenu" class="menu-popup">
+    <p onclick="deleteChat()" style="color: #ff5b5b;">🗑 Clear Chat</p>
+    <p onclick="blockUser()" style="color: #ffb02e;" id="blockBtnText">🚫 Block User</p>
+  </div>
+
+  <div class="incoming-call-box" id="incomingCallUI">
+    <div class="incoming-avatar" id="incAvatar">U</div>
+    <div class="incoming-name" id="incName">User</div>
+    <div class="incoming-text">Incoming Audio Call...</div>
+    <div class="incoming-actions">
+      <button class="inc-btn btn-decline" onclick="declineCall()">☎</button>
+      <button class="inc-btn btn-answer" onclick="answerCall()">📞</button>
+    </div>
+  </div>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyB2o5DXG0r249JfueFAL7ybXiDspUdW0Ns",
+      authDomain: "privateconnect-37f5b.firebaseapp.com",
+      databaseURL: "https://privateconnect-37f5b-default-rtdb.asia-southeast1.firebasedatabase.app",
+      projectId: "privateconnect-37f5b",
+      storageBucket: "privateconnect-37f5b.firebasestorage.app",
+      messagingSenderId: "177183011219",
+      appId: "1:177183011219:web:11868ef01a65b2d46d7866"
+    };
+
+    if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+    const db = firebase.database();
+
+    const currentUserId = localStorage.getItem('myId');
+    const params = new URLSearchParams(window.location.search);
+    const targetUserId = params.get('with');
+
+    if (!currentUserId || !targetUserId) window.location.href = "index.html";
+
+    document.getElementById('chatWith').textContent = targetUserId;
+    document.getElementById('avatarLetter').textContent = targetUserId.charAt(0);
+    
+    const chatRoomId = [currentUserId, targetUserId].sort().join("_");
+    const callRoomId = chatRoomId + "_CALL";
+    
+    const ringtone = new Audio('https://actions.google.com/sounds/v1/alarms/phone_ringing.ogg');
+    ringtone.loop = true;
+
+    db.ref('chats/' + chatRoomId).on('value', snap => {
+        if(!snap.exists()) document.getElementById('chatBox').innerHTML = "";
+    });
+
+    db.ref('blocks/' + currentUserId + '/' + targetUserId).on('value', (snap) => {
+        if(snap.exists()) {
+            document.getElementById('blockBtnText').innerText = "✅ Unblock User";
+            document.getElementById('statusText').innerText = "Blocked";
+            document.getElementById('statusText').style.color = "#ff5b5b";
+        } else {
+            document.getElementById('blockBtnText').innerText = "🚫 Block User";
+            document.getElementById('statusText').innerText = "Online";
+            document.getElementById('statusText').style.color = "#8696a0";
+        }
+    });
+
+    function loadMessages() {
+      db.ref('chats/' + chatRoomId).on('child_added', (snapshot) => {
+        appendMessage(snapshot.val());
+      });
+    }
+    loadMessages();
+
+    function appendMessage(msg) {
+      const chatBox = document.getElementById('chatBox');
+      const div = document.createElement('div');
+      let timeString = new Date(msg.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+      
+      if (msg.isCall) {
+          div.className = "call-log";
+          div.innerHTML = `📞 ${msg.text} • <span style="color:#8696a0; font-size:10px;">${timeString}</span>`;
+      } else {
+          div.className = `message ${msg.sender === currentUserId ? 'sent' : 'received'}`;
+          div.innerHTML = `<span class="msg-text">${msg.text}</span><span class="time">${timeString}</span>`;
+      }
+      
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById('messageInput');
+      const text = input.value.trim();
+      if (!text) return;
+
+      const iBlocked = await db.ref('blocks/' + currentUserId + '/' + targetUserId).once('value');
+      if (iBlocked.exists()) return alert("Aapne is user ko block kiya hua hai. Pehle unblock karein.");
+
+      const blockedMe = await db.ref('blocks/' + targetUserId + '/' + currentUserId).once('value');
+      if (blockedMe.exists()) return alert("Is user ne aapko block kar diya hai!");
+
+      await db.ref('chats/' + chatRoomId).push({ sender: currentUserId, text: text, isCall: false, timestamp: Date.now() });
+      await db.ref('userChats/' + currentUserId + '/' + targetUserId).set({ lastMessageAt: Date.now() });
+      await db.ref('userChats/' + targetUserId + '/' + currentUserId).set({ lastMessageAt: Date.now() });
+
+      input.value = "";
+    }
+
+    document.getElementById('messageInput').addEventListener("keypress", (e) => { if (e.key === "Enter") sendMessage(); });
+    function showOptions() { const m = document.getElementById('optionsMenu'); m.style.display = (m.style.display === 'block') ? 'none' : 'block'; }
+    function goBack() { window.location.href = "index.html"; }
+
+    function startCall() { 
+        db.ref('chats/' + chatRoomId).push({ sender: currentUserId, text: "Audio Call", isCall: true, timestamp: Date.now() });
+        window.location.href = `call.html?with=${targetUserId}`; 
+    }
+
+    async function deleteChat() {
+      if (confirm("Pura chat clear karna chahte hain?")) {
+        await db.ref('chats/' + chatRoomId).remove();
+        showOptions();
+      }
+    }
+
+    async function blockUser() {
+      const blockRef = db.ref('blocks/' + currentUserId + '/' + targetUserId);
+      const snap = await blockRef.once('value');
+      if(snap.exists()) { await blockRef.remove(); alert("Unblocked!"); } 
+      else { await blockRef.set(true); alert("Blocked!"); }
+      showOptions();
+    }
+
+    db.ref('calls/' + callRoomId).on('value', snap => {
+        const data = snap.val();
+        const ui = document.getElementById('incomingCallUI');
+        if (data && data.offer && data.sender !== currentUserId) {
+            document.getElementById('incName').innerText = targetUserId;
+            document.getElementById('incAvatar').innerText = targetUserId.charAt(0);
+            ui.style.display = "flex";
+            ringtone.play().catch(e => console.log("Auto-play blocked"));
+        } else {
+            ui.style.display = "none";
+            ringtone.pause();
+            ringtone.currentTime = 0;
+        }
+    });
+
+    function answerCall() {
+        ringtone.pause();
+        window.location.href = `call.html?with=${targetUserId}`;
+    }
+
+    function declineCall() {
+        ringtone.pause();
+        db.ref('calls/' + callRoomId).remove();
+    }
+  </script>
+</body>
+</html>
